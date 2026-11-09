@@ -80,7 +80,6 @@ nav .ic{font-size:18px;line-height:1}
 .banner{background:linear-gradient(135deg,#c2410c,#9a3412);border:1px solid #9a3412;border-radius:14px;padding:12px 14px;margin-bottom:12px;color:#fff}
 .banner .t{font-weight:600;font-size:14px}
 .banner .s{font-size:12px;color:#fed7aa;margin-top:2px}
-.qbtn{color:#fff;padding:14px 8px;font-weight:600;font-size:14px;border-radius:11px}
 .donut-wrap{display:flex;justify-content:center;margin:6px 0 16px}
 .donut{width:180px;height:180px;border-radius:50%;position:relative;display:flex;align-items:center;justify-content:center}
 .donut::after{content:'';position:absolute;inset:30px;border-radius:50%;background:var(--card)}
@@ -102,6 +101,22 @@ nav .ic{font-size:18px;line-height:1}
 .chk{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:14px}
 .chk input{width:auto;flex:none}
 .hint{background:var(--card2);border-left:3px solid var(--acc);padding:10px 12px;border-radius:8px;font-size:12px;color:var(--mut);line-height:1.5;margin-top:8px}
+/* Custom Additions */
+.wallet-details{font-size:12px;color:var(--mut);margin-top:4px;line-height:1.4}
+.dash-tabs{display:flex;gap:6px;margin-bottom:12px}
+.dash-tabs button{flex:1;padding:8px;font-size:13px;font-weight:600;background:var(--card2);color:var(--mut);border-radius:8px}
+.dash-tabs button.on{background:var(--acc);color:#fff}
+.acc-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding-bottom:10px;border-bottom:1px solid var(--line);margin-bottom:10px}
+.acc-header h2{margin:0}
+.acc-body{display:none}
+.acc-body.open{display:block;animation:fadeIn .2s}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.cat-opt-list{max-height:50vh;overflow-y:auto;margin-bottom:10px}
+.cat-opt-item{display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid var(--line);cursor:pointer}
+.cat-opt-item:last-child{border-bottom:none}
+.cat-opt-item:active{background:var(--card2)}
+.fab-menu{position:fixed;bottom:calc(155px + env(safe-area-inset-bottom));right:16px;display:flex;flex-direction:column;gap:10px;z-index:15}
+.fab-menu button{width:auto;padding:10px 16px;border-radius:24px;font-weight:600;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,.3);display:flex;align-items:center;gap:8px}
 </style>
 </head>
 <body>
@@ -109,6 +124,7 @@ nav .ic{font-size:18px;line-height:1}
 <div id="app"></div>
 <nav id="nav"></nav>
 <div id="modal" class="modal" style="display:none"></div>
+<div id="fab-menu" class="fab-menu" style="display:none"></div>
 
 <script>
 /* ============ UTIL ============ */
@@ -132,9 +148,9 @@ function advanceDate(dateStr, freq){
 function freqLabel(f){return f==='daily'?'Harian':f==='weekly'?'Mingguan':'Bulanan';}
 
 /* ============ DATA ============ */
-let db, ui={tab:'dashboard',month:nowMonth(),editId:null,formType:'expense'}, locked=false, pinBuffer='';
+let db, ui={tab:'dashboard',month:nowMonth(),editId:null,formType:'expense',txSearch:'',dashTab:'expense',expandedCats:{}}, locked=false, pinBuffer='';
 
-function defaultSettings(){return{themeMode:'auto',lightHour:7,darkHour:17,lastBackupAt:null,backupReminderDays:14,pinEnabled:false,pin:''};}
+function defaultSettings(){return{themeMode:'auto',lightHour:7,darkHour:17,lastBackupAt:null,backupReminderDays:14,pinEnabled:false,pin:'',recapEnabled:false,recapTime:'20:00',lastRecapDate:''};}
 function seed(){
   return{
     accounts:[
@@ -187,13 +203,9 @@ function applyTheme(){document.documentElement.setAttribute('data-theme',shouldU
 function renderLock(){
   const len=(db.settings.pin||'1234').length;
   document.getElementById('lock').innerHTML=`<div class="lock-box" id="lock-box">
-    <div class="lock-logo">🔒</div>
-    <div class="lock-title">Uangku</div>
-    <div class="lock-sub">Masukkan PIN</div>
+    <div class="lock-logo">🔒</div><div class="lock-title">Uangku</div><div class="lock-sub">Masukkan PIN</div>
     <div class="pin-dots" id="pin-dots"></div>
-    <div class="pin-pad">
-      ${['1','2','3','4','5','6','7','8','9','','0','⌫'].map(k=>k===''?'<div></div>':`<button class="pin-key" onclick="pinPress('${k}')">${k}</button>`).join('')}
-    </div>
+    <div class="pin-pad">${['1','2','3','4','5','6','7','8','9','','0','⌫'].map(k=>k===''?'<div></div>':`<button class="pin-key" onclick="pinPress('${k}')">${k}</button>`).join('')}</div>
   </div>`;
   renderPinDots();
 }
@@ -217,10 +229,35 @@ function checkLock(){
   if(db.settings.pinEnabled&&db.settings.pin){locked=true;document.getElementById('lock').style.display='flex';renderLock();}
 }
 
-/* ============ BACKUP REMINDER ============ */
+/* ============ BACKUP & NOTIF ============ */
 function daysSinceBackup(){if(!db.settings.lastBackupAt)return 9999;return Math.floor((Date.now()-db.settings.lastBackupAt)/DAY);}
 function needsBackup(){return daysSinceBackup()>=(db.settings.backupReminderDays||14);}
 function markBackup(){db.settings.lastBackupAt=Date.now();save();}
+
+function checkRecapNotif(){
+  if(!db.settings.recapEnabled) return;
+  const now=new Date();
+  const curTime=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  const today=todayStr();
+  if(curTime===db.settings.recapTime && db.settings.lastRecapDate!==today){
+    db.settings.lastRecapDate=today; save();
+    if(!("Notification" in window))return;
+    if(Notification.permission==="granted"){
+      const s=monthStats(today.slice(0,7));
+      let expToday=0,incToday=0;
+      db.transactions.forEach(t=>{
+        if(t.date===today){
+          if(t.type==='expense')expToday+=t.amount;
+          if(t.type==='income')incToday+=t.amount;
+        }
+      });
+      new Notification("Rekap Harian Uangku", {
+        body: `Hari ini:\nPemasukan: ${rp(incToday)}\nPengeluaran: ${rp(expToday)}\nSaldo total: ${rp(totalBalance())}`,
+        icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>"
+      });
+    }
+  }
+}
 
 /* ============ HITUNG ============ */
 function balance(acc){
@@ -260,16 +297,6 @@ function processRecurring(){
   if(created>0){save();setTimeout(()=>alert(created+' transaksi berulang telah ditambahkan otomatis.'),600);}
 }
 
-/* ============ DONUT ============ */
-function donutChart(items,total){
-  if(!items.length||total<=0)return '<div class="empty">Belum ada data</div>';
-  let acc=0;
-  const segs=items.map(it=>{const start=acc,pct=it.v/total;acc+=pct*360;return `${it.c.color} ${start.toFixed(1)}deg ${acc.toFixed(1)}deg`;}).join(',');
-  return `<div class="donut-wrap"><div class="donut" style="background:conic-gradient(${segs})">
-    <div class="donut-center"><div class="k">Total</div><div class="donut-total mono">${rp(total)}</div></div>
-  </div></div>`;
-}
-
 /* ============ RENDER ============ */
 function render(){
   if(locked)return;
@@ -285,44 +312,67 @@ function renderNav(){
   const items=[['dashboard','🏠','Beranda'],['tx','📋','Transaksi'],['wallet','💳','Dompet'],['cat','🏷️','Kategori'],['set','⚙️','Lainnya']];
   document.getElementById('nav').innerHTML=items.map(([k,i,l])=>
     `<button class="${ui.tab===k?'on':''}" onclick="setTab('${k}')"><span class="ic">${i}</span>${l}</button>`).join('');
+  document.getElementById('fab-menu').style.display='none';
 }
 function setTab(t){ui.tab=t;window.scrollTo(0,0);render();}
+
+function toggleCatAccordion(type){
+  ui.expandedCats[type]=!ui.expandedCats[type];
+  render();
+}
+function setDashTab(t){ui.dashTab=t;render();}
 
 /* ---------- BERANDA ---------- */
 function viewDashboard(){
   const ym=ui.month,s=monthStats(ym);
-  const expList=Object.entries(s.exp).map(([id,v])=>({c:catOf(id),v})).filter(x=>x.c).sort((a,b)=>b.v-a.v);
-  const incList=Object.entries(s.inc).map(([id,v])=>({c:catOf(id),v})).filter(x=>x.c).sort((a,b)=>b.v-a.v);
-  const bars=(list,total,emptyMsg)=>{
-    if(!list.length)return `<div class="empty">${emptyMsg}</div>`;
-    return list.map(({c,v})=>{
-      const p=total>0?v/total*100:0;
-      let budLine='';
-      if(c.budget>0){const bp=v/c.budget*100,over=v>c.budget;budLine=`<div class="pctxt ${over?'red':''}">Anggaran: ${rp(c.budget)} • ${bp.toFixed(0)}%${over?' (LEWAT!)':''}</div>`;}
-      return `<div class="catrow">
-        <div class="cathead"><span class="dot" style="background:${c.color}"></span><span class="nm">${esc(c.name)}</span><span class="am mono">${rp(v)}</span></div>
-        <div class="bar"><div style="width:${Math.min(p,100).toFixed(1)}%;background:${c.color}"></div></div>
-        <div class="pctxt">${p.toFixed(1)}% dari total</div>${budLine}</div>`;
-    }).join('');
-  };
-  const wallets=db.accounts.map(a=>`<div class="wrow"><div>${esc(a.name)}<span class="wtag">${a.type==='cash'?'Tunai':a.type==='ewallet'?'E-Wallet':'Bank'}</span></div><b class="mono">${rp(balance(a))}</b></div>`).join('')||'<div class="empty">Belum ada dompet</div>';
+  
+  const wDetails=db.accounts.map(a=>`${esc(a.name)}: ${rp(balance(a))}`).join(' • ');
   const banner=needsBackup()?`<div class="banner"><div style="display:flex;align-items:center;gap:10px">
     <div style="font-size:22px">🔔</div>
     <div style="flex:1"><div class="t">Waktunya backup!</div>
-    <div class="s">${db.settings.lastBackupAt?`Sudah ${daysSinceBackup()} hari sejak backup terakhir.`:'Anda belum pernah backup data.'}</div></div>
+    <div class="s">Sudah ${daysSinceBackup()} hari sejak backup terakhir.</div></div>
     <button style="background:#fff;color:#9a3412;padding:8px 12px;font-size:12px;font-weight:700" onclick="setTab('set')">Backup</button>
   </div></div>`:'';
+
+  // List Data berdasarkan Tab
+  const isExp = ui.dashTab==='expense';
+  const listRaw = isExp ? s.exp : s.inc;
+  const list = Object.entries(listRaw).map(([id,v])=>({c:catOf(id),v})).filter(x=>x.c).sort((a,b)=>b.v-a.v);
+  const total = isExp ? s.te : s.ti;
+  
+  // Donut
+  let donutHtml='';
+  if(list.length>0&&total>0){
+    let acc=0;
+    const segs=list.map(it=>{const start=acc,pct=it.v/total;acc+=pct*360;return `${it.c.color} ${start.toFixed(1)}deg ${acc.toFixed(1)}deg`;}).join(',');
+    donutHtml=`<div class="donut-wrap"><div class="donut" style="background:conic-gradient(${segs})">
+      <div class="donut-center"><div class="k">Total ${isExp?'Keluar':'Masuk'}</div><div class="donut-total mono">${rp(total)}</div></div>
+    </div></div>`;
+  }
+
+  // Bars
+  const barsHtml = list.length ? list.map(({c,v})=>{
+      const p=total>0?v/total*100:0;
+      let budLine='';
+      if(c.budget>0&&isExp){const bp=v/c.budget*100,over=v>c.budget;budLine=`<div class="pctxt ${over?'red':''}">Anggaran: ${rp(c.budget)} • ${bp.toFixed(0)}%${over?' (LEWAT!)':''}</div>`;}
+      return `<div class="catrow">
+        <div class="cathead"><span class="dot" style="background:${c.color}"></span><span class="nm">${esc(c.name)}</span><span class="am mono">${rp(v)}</span></div>
+        <div class="bar"><div style="width:${Math.min(p,100).toFixed(1)}%;background:${c.color}"></div></div>
+        <div class="pctxt">${p.toFixed(1)}%</div>${budLine}</div>`;
+  }).join('') : `<div class="empty">Belum ada data</div>`;
+
+  const isOpen = ui.expandedCats[ui.dashTab];
+
   return `
   <header><h1>Uangku</h1><div class="sub">Catatan keuangan pribadi</div></header>
   <div class="pad">
     ${banner}
-    <div class="card"><div class="k">Total Saldo (semua dompet)</div><div class="big mono">${rp(totalBalance())}</div></div>
-    <div class="card"><h2>Tambah Cepat</h2>
-      <div class="row">
-        <button class="qbtn" style="background:#166534" onclick="quickAdd('income')">💰 Pemasukan</button>
-        <button class="qbtn" style="background:#991b1b" onclick="quickAdd('expense')">💸 Pengeluaran</button>
-      </div>
+    <div class="card">
+      <div class="k">Total Saldo (semua dompet)</div>
+      <div class="big mono">${rp(totalBalance())}</div>
+      <div class="wallet-details">${wDetails}</div>
     </div>
+
     <div class="card">
       <div class="row" style="margin-bottom:12px;align-items:center">
         <div style="flex:0 0 auto"><div class="k">Periode</div></div>
@@ -337,20 +387,67 @@ function viewDashboard(){
         <div class="v mono ${s.ti-s.te>=0?'green':'red'}">${rp(s.ti-s.te)}</div>
       </div>
     </div>
-    <div class="card"><h2>Grafik Pengeluaran</h2>${donutChart(expList,s.te)}${bars(expList,s.te,'Belum ada pengeluaran bulan ini')}</div>
-    <div class="card"><h2>Grafik Pemasukan</h2>${donutChart(incList,s.ti)}${bars(incList,s.ti,'Belum ada pemasukan bulan ini')}</div>
-    <div class="card"><h2>Saldo per Dompet</h2>${wallets}</div>
-  </div>`;
+
+    <div class="dash-tabs">
+      <button class="${isExp?'on':''}" onclick="setDashTab('expense')">Pengeluaran</button>
+      <button class="${!isExp?'on':''}" onclick="setDashTab('income')">Pemasukan</button>
+    </div>
+
+    <div class="card">
+      <div class="acc-header" onclick="toggleCatAccordion('${ui.dashTab}')">
+        <h2>Rangkuman Kategori ${isExp?'Pengeluaran':'Pemasukan'}</h2>
+        <span style="font-size:18px;color:var(--mut)">${isOpen?'▲':'▼'}</span>
+      </div>
+      <div class="acc-body ${isOpen?'open':''}">
+        ${donutHtml}${barsHtml}
+      </div>
+      ${!isOpen?`<div class="sub" style="text-align:center">Ketuk untuk melihat rincian</div>`:''}
+    </div>
+  </div>
+  
+  <button class="fab" onclick="toggleFab()">+</button>
+  `;
 }
 function setMonth(v){if(v)ui.month=v;render();}
+function toggleFab(){
+  const m=document.getElementById('fab-menu');
+  if(m.style.display==='flex'){m.style.display='none';return;}
+  m.innerHTML=`
+    <button style="background:#166534;color:#fff" onclick="quickAdd('income')">💰 Pemasukan</button>
+    <button style="background:#991b1b;color:#fff" onclick="quickAdd('expense')">💸 Pengeluaran</button>
+    <button style="background:#334155;color:#fff" onclick="quickAdd('transfer')">⇄ Transfer</button>
+  `;
+  m.style.display='flex';
+}
 
 /* ---------- TRANSAKSI ---------- */
+function setTxSearch(v){ui.txSearch=v;render();}
 function viewTx(){
-  const list=db.transactions.filter(t=>(t.date||'').startsWith(ui.month)).sort((a,b)=>(b.date+b.id).localeCompare(a.date+a.id));
-  const body=list.length?list.map(txRow).join(''):'<div class="empty">Belum ada transaksi bulan ini.<br>Tekan tombol + untuk menambah.</div>';
+  const q = (ui.txSearch||'').toLowerCase();
+  let list=db.transactions.filter(t=>(t.date||'').startsWith(ui.month));
+  
+  if(q){
+    list = list.filter(t=>{
+      const cat=catOf(t.categoryId), acc=accOf(t.accountId), to=accOf(t.toAccountId);
+      const cName=cat?cat.name.toLowerCase():'';
+      const aName=acc?acc.name.toLowerCase():'';
+      const tName=to?to.name.toLowerCase():'';
+      const note=(t.note||'').toLowerCase();
+      const amt=String(t.amount);
+      return cName.includes(q)||aName.includes(q)||tName.includes(q)||note.includes(q)||amt.includes(q);
+    });
+  }
+  
+  list.sort((a,b)=>(b.date+b.id).localeCompare(a.date+a.id));
+  
+  const body=list.length?list.map(txRow).join(''):'<div class="empty">Tidak ada transaksi ditemukan.</div>';
+  
   return `<header><h1>Transaksi</h1><div class="sub">${list.length} transaksi</div></header>
   <div class="pad">
-    <input type="month" value="${ui.month}" onchange="setMonth(this.value)" style="margin-bottom:12px">
+    <div class="row" style="margin-bottom:10px">
+      <input type="month" value="${ui.month}" onchange="setMonth(this.value)" style="flex:0 0 130px">
+      <input type="text" placeholder="Cari catatan / kategori..." value="${esc(ui.txSearch)}" oninput="setTxSearch(this.value)" style="flex:1">
+    </div>
     <div class="card">${body}</div>
   </div>
   <button class="fab" onclick="quickAdd('expense')">+</button>`;
@@ -464,9 +561,8 @@ function quickAddCat(type){
   const color=CAT_COLORS[db.categories.length%CAT_COLORS.length];
   db.categories.push({id:uid(),name:name.trim(),type,color,budget:0});
   save();render();
-  if(document.getElementById('modal').style.display==='flex'&&document.getElementById('f-cat')){
-    const newCat=db.categories[db.categories.length-1];
-    document.getElementById('f-cat').innerHTML=catOpts(ui.formType,newCat.id);
+  if(document.getElementById('modal').style.display==='flex'&&document.getElementById('modal').innerHTML.includes('Pilih Kategori')){
+    showCatPicker(ui.formType);
   }
 }
 function delCategory(id){
@@ -479,6 +575,7 @@ function delCategory(id){
 /* ---------- FORM TRANSAKSI ---------- */
 function quickAdd(type){
   ui.editId=null;ui.formType=type;
+  document.getElementById('fab-menu').style.display='none';
   if(!db.accounts.length)return alert('Tambahkan dompet terlebih dahulu di tab Dompet.');
   document.getElementById('modal').style.display='flex';
   document.getElementById('modal').innerHTML=sheetHTML(null);
@@ -495,6 +592,10 @@ function sheetHTML(t){
   const ty=ui.formType;
   const accOpts=db.accounts.map(a=>`<option value="${a.id}" ${t&&t.accountId===a.id?'selected':''}>${esc(a.name)}</option>`).join('');
   const toOpts=db.accounts.map(a=>`<option value="${a.id}" ${t&&t.toAccountId===a.id?'selected':''}>${esc(a.name)}</option>`).join('');
+  
+  const selCatId = t ? t.categoryId : null;
+  const selCatName = selCatId&&catOf(selCatId) ? catOf(selCatId).name : '(Pilih Kategori)';
+
   return `<div class="sheet" onclick="event.stopPropagation()">
     <div class="sheethead"><b>${t?'Edit':'Tambah'} Transaksi</b><button onclick="closeModal()">✕</button></div>
     <div class="seg">
@@ -506,13 +607,16 @@ function sheetHTML(t){
     <label><span class="lb">Tanggal</span><input id="f-date" type="date" value="${t?t.date:todayStr()}"></label>
     <label><span class="lb">${ty==='transfer'?'Dari Dompet':'Dompet'}</span><select id="f-acc">${accOpts}</select></label>
     <label id="wrap-to" style="display:${ty==='transfer'?'block':'none'}"><span class="lb">Ke Dompet</span><select id="f-to">${toOpts}</select></label>
+    
     <div id="wrap-cat" style="display:${ty==='transfer'?'none':'block'};margin-bottom:10px">
-      <div class="lb" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="font-size:12px;color:var(--mut)">Kategori</span>
-        <button onclick="quickAddCat('${ty==='income'?'income':'expense'}')" style="padding:4px 10px;font-size:11px;background:var(--acc);color:#fff;font-weight:600">+ Kategori</button>
+      <div class="lb" style="margin-bottom:6px">Kategori</div>
+      <div style="display:flex;gap:8px">
+        <button onclick="showCatPicker('${ty}')" style="flex:1;text-align:left;background:var(--card2);color:var(--txt)" id="btn-pick-cat">${esc(selCatName)}</button>
+        <button onclick="quickAddCat('${ty}')" style="padding:0 16px;background:var(--acc);color:#fff;font-weight:600">+</button>
       </div>
-      <select id="f-cat">${catOpts(ty,t?t.categoryId:null)}</select>
+      <input type="hidden" id="f-cat" value="${selCatId||''}">
     </div>
+
     <label><span class="lb">Catatan (opsional)</span><input id="f-note" type="text" value="${t?esc(t.note||''):''}" placeholder="Contoh: makan siang"></label>
     ${!t?`<div class="chk"><input type="checkbox" id="f-rec" onchange="document.getElementById('wrap-freq').style.display=this.checked?'block':'none'">
       <label for="f-rec" style="margin:0">Ulangi otomatis (transaksi berulang)</label></div>
@@ -524,11 +628,63 @@ function sheetHTML(t){
     ${t?`<button class="danger" onclick="delTx('${t.id}')">Hapus Transaksi</button>`:''}
   </div>`;
 }
-function catOpts(type,sel){
-  const list=db.categories.filter(c=>c.type===type);
-  if(!list.length)return '<option value="">(belum ada kategori)</option>';
-  return list.map(c=>`<option value="${c.id}" ${c.id===sel?'selected':''}>${esc(c.name)}</option>`).join('');
+
+function showCatPicker(type){
+  // Hitung frekuensi
+  const counts={};
+  db.transactions.forEach(t=>{ counts[t.categoryId]=(counts[t.categoryId]||0)+1; });
+  
+  const list=db.categories.filter(c=>c.type===type).sort((a,b)=>{
+    const ca=counts[a.id]||0, cb=counts[b.id]||0;
+    if(ca!==cb)return cb-ca; // Descending
+    return a.name.localeCompare(b.name);
+  });
+
+  if(!list.length)return alert('Belum ada kategori. Tambah dulu.');
+
+  const el=document.getElementById('modal');
+  el.innerHTML=`<div class="sheet" onclick="event.stopPropagation()">
+    <div class="sheethead"><b>Pilih Kategori</b><button onclick="backToForm()">✕</button></div>
+    <div class="cat-opt-list">
+      ${list.map(c=>`<div class="cat-opt-item" onclick="pickCategory('${c.id}','${esc(c.name)}')">
+        <span style="width:12px;height:12px;border-radius:50%;background:${c.color}"></span>
+        <span style="flex:1;font-size:15px">${esc(c.name)}</span>
+        <span class="sub" style="font-size:11px">${counts[c.id]||0} kali</span>
+      </div>`).join('')}
+    </div>
+    <button class="primary" style="background:var(--acc)" onclick="quickAddCat('${type}')">+ Kategori Baru</button>
+  </div>`;
 }
+
+function pickCategory(id,name){
+  document.getElementById('f-cat').value=id;
+  document.getElementById('btn-pick-cat').innerText=name;
+  backToForm();
+}
+function backToForm(){
+  const ty=ui.formType;
+  const t=ui.editId?db.transactions.find(x=>x.id===ui.editId):null;
+  // Simpan input yang sudah diketik sementara
+  const amount=document.getElementById('f-amount').value;
+  const date=document.getElementById('f-date').value;
+  const note=document.getElementById('f-note').value;
+  const acc=document.getElementById('f-acc').value;
+  const selCat=document.getElementById('f-cat').value;
+  
+  document.getElementById('modal').innerHTML=sheetHTML(t);
+  
+  // Kembalikan inputan
+  document.getElementById('f-amount').value=amount;
+  document.getElementById('f-date').value=date;
+  document.getElementById('f-note').value=note;
+  document.getElementById('f-acc').value=acc;
+  if(selCat){
+    document.getElementById('f-cat').value=selCat;
+    const c=catOf(selCat);
+    if(c)document.getElementById('btn-pick-cat').innerText=c.name;
+  }
+}
+
 function setFormType(ty){
   const amount=document.getElementById('f-amount').value;
   const date=document.getElementById('f-date').value;
@@ -555,7 +711,7 @@ function saveTx(){
     if(toAccountId===accountId)return alert('Dompet asal dan tujuan tidak boleh sama');
   }else{
     categoryId=document.getElementById('f-cat').value;
-    if(!categoryId)return alert('Pilih kategori');
+    if(!categoryId)return alert('Pilih kategori terlebih dahulu');
   }
   const data={type:ty,amount,date,accountId,categoryId,toAccountId,note};
   if(ui.editId){
@@ -595,6 +751,16 @@ function viewSettings(){
   <div class="pad">
 
     <div class="card">
+      <h2>⏰ Pengingat Rekap Harian</h2>
+      <div class="chk"><input type="checkbox" id="recap-toggle" ${s.recapEnabled?'checked':''} onchange="toggleRecap(this.checked)">
+        <label for="recap-toggle" style="margin:0">Aktifkan notifikasi rekap harian</label></div>
+      <label style="margin-top:10px"><span class="lb">Jam Rekap</span>
+        <input type="time" value="${s.recapTime}" onchange="setSetting('recapTime',this.value)" style="width:auto;display:inline-block">
+      </label>
+      <div class="sub" style="margin-top:8px">Notifikasi akan muncul di layar HP Anda saat jam yang ditentukan (pastikan aplikasi diizinkan mengirim notifikasi).</div>
+    </div>
+
+    <div class="card">
       <h2>💾 Backup & Restore Lokal</h2>
       <div class="sub" style="margin-bottom:10px">Backup terakhir: <b style="color:var(--txt)">${lastText}</b>
         ${needsBackup()?'<span style="color:var(--bad)"> • Waktunya backup!</span>':''}</div>
@@ -605,11 +771,7 @@ function viewSettings(){
         <span class="lb">Pulihkan dari File Backup</span>
         <input type="file" accept=".json,application/json" onchange="importJSON(this)" style="background:var(--card);border:1px dashed var(--acc);padding:14px;cursor:pointer">
       </label>
-
-      <div class="hint" style="margin-top:10px">
-        <b>Cara aman menyimpan:</b> Setelah file terunduh, buka aplikasi <b>Google Drive</b> (atau WhatsApp/Email), lalu unggah file <code>.json</code> tersebut. File ini berisi seluruh data Anda.
-      </div>
-
+      
       <label style="margin-top:12px"><span class="lb">Ingatkan backup setiap (hari)</span>
         <input type="number" min="1" max="90" value="${s.backupReminderDays}" onchange="setSetting('backupReminderDays',Number(this.value))"></label>
     </div>
@@ -619,7 +781,6 @@ function viewSettings(){
       <div class="chk"><input type="checkbox" id="pin-toggle" ${s.pinEnabled?'checked':''} onchange="togglePin(this.checked)">
         <label for="pin-toggle" style="margin:0">Kunci aplikasi dengan PIN</label></div>
       ${s.pinEnabled?`<button class="primary" style="background:#334155" onclick="changePin()">Ganti PIN</button>`:''}
-      <div class="sub" style="margin-top:8px">PIN hanya tersimpan di HP Anda. Jika lupa, reset dengan hapus data browser (backup JSON dulu!).</div>
     </div>
 
     <div class="card">
@@ -634,12 +795,10 @@ function viewSettings(){
         <label><span class="lb">Mulai Terang (jam)</span><input type="number" min="0" max="23" value="${s.lightHour}" onchange="setSetting('lightHour',Number(this.value))"></label>
         <label><span class="lb">Mulai Gelap (jam)</span><input type="number" min="0" max="23" value="${s.darkHour}" onchange="setSetting('darkHour',Number(this.value))"></label>
       </div>
-      <div class="sub">Sekarang jam ${new Date().getHours()}:${String(new Date().getMinutes()).padStart(2,'0')} → tema ${shouldUseLight()?'TERANG':'GELAP'}.</div>
     </div>
 
     <div class="card">
       <h2>Transaksi Berulang</h2>${recurringList}
-      <div class="sub" style="margin-top:8px">Centang "Ulangi otomatis" saat membuat transaksi baru.</div>
     </div>
 
     <div class="card">
@@ -654,8 +813,19 @@ function viewSettings(){
       <button class="danger" onclick="resetAll()">Hapus Semua Data</button>
     </div>
 
-    <div class="card" style="text-align:center"><div class="sub">Uangku v5 • Offline & Lokal</div></div>
+    <div class="card" style="text-align:center"><div class="sub">Uangku v6 • Offline & Lokal</div></div>
   </div>`;
+}
+
+function toggleRecap(on){
+  if(on&&"Notification" in window&&Notification.permission!=="granted"){
+    Notification.requestPermission().then(p=>{
+      if(p==="granted"){db.settings.recapEnabled=true;save();render();}
+      else{alert('Izin notifikasi ditolak. Silakan izinkan di pengaturan browser.');render();}
+    });
+  }else{
+    db.settings.recapEnabled=on;save();render();
+  }
 }
 
 function setSetting(k,v){
@@ -671,7 +841,6 @@ function togglePin(on){
     const p2=prompt('Konfirmasi PIN:');
     if(p!==p2){render();return alert('PIN tidak cocok.');}
     db.settings.pin=p;db.settings.pinEnabled=true;save();render();
-    alert('PIN diaktifkan. Jangan lupa PIN Anda!');
   }else{db.settings.pinEnabled=false;save();render();}
 }
 function changePin(){
@@ -786,7 +955,10 @@ applyTheme();
 processRecurring();
 checkLock();
 render();
-setInterval(()=>{if(!locked)applyTheme();},60000);
+setInterval(()=>{
+  if(!locked)applyTheme();
+  checkRecapNotif();
+},30000); // Cek notifikasi tiap 30 detik
 </script>
 </body>
 </html>
