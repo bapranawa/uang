@@ -106,11 +106,6 @@ nav .ic{font-size:18px;line-height:1}
 .dash-tabs{display:flex;gap:6px;margin-bottom:12px}
 .dash-tabs button{flex:1;padding:8px;font-size:13px;font-weight:600;background:var(--card2);color:var(--mut);border-radius:8px}
 .dash-tabs button.on{background:var(--acc);color:#fff}
-.acc-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding-bottom:10px;border-bottom:1px solid var(--line);margin-bottom:10px}
-.acc-header h2{margin:0}
-.acc-body{display:none}
-.acc-body.open{display:block;animation:fadeIn .2s}
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .cat-opt-list{max-height:50vh;overflow-y:auto;margin-bottom:10px}
 .cat-opt-item{display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid var(--line);cursor:pointer}
 .cat-opt-item:last-child{border-bottom:none}
@@ -148,7 +143,7 @@ function advanceDate(dateStr, freq){
 function freqLabel(f){return f==='daily'?'Harian':f==='weekly'?'Mingguan':'Bulanan';}
 
 /* ============ DATA ============ */
-let db, ui={tab:'dashboard',month:nowMonth(),editId:null,formType:'expense',txSearch:'',dashTab:'expense',expandedCats:{}}, locked=false, pinBuffer='';
+let db, ui={tab:'dashboard',month:nowMonth(),editId:null,formType:'expense',txSearch:'',dashTab:'expense'}, locked=false, pinBuffer='';
 
 function defaultSettings(){return{themeMode:'auto',lightHour:7,darkHour:17,lastBackupAt:null,backupReminderDays:14,pinEnabled:false,pin:'',recapEnabled:false,recapTime:'20:00',lastRecapDate:''};}
 function seed(){
@@ -314,11 +309,6 @@ function renderNav(){
   document.getElementById('fab-menu').style.display='none';
 }
 function setTab(t){ui.tab=t;window.scrollTo(0,0);render();}
-
-function toggleCatAccordion(type){
-  ui.expandedCats[type]=!ui.expandedCats[type];
-  render();
-}
 function setDashTab(t){ui.dashTab=t;render();}
 
 /* ---------- BERANDA ---------- */
@@ -357,8 +347,6 @@ function viewDashboard(){
         <div class="pctxt">${p.toFixed(1)}%</div>${budLine}</div>`;
   }).join('') : `<div class="empty">Belum ada data</div>`;
 
-  const isOpen = ui.expandedCats[ui.dashTab];
-
   return `
   <header><h1>Uangku</h1><div class="sub">Catatan keuangan pribadi</div></header>
   <div class="pad">
@@ -390,14 +378,8 @@ function viewDashboard(){
     </div>
 
     <div class="card">
-      <div class="acc-header" onclick="toggleCatAccordion('${ui.dashTab}')">
-        <h2>Rangkuman Kategori ${isExp?'Pengeluaran':'Pemasukan'}</h2>
-        <span style="font-size:18px;color:var(--mut)">${isOpen?'▲':'▼'}</span>
-      </div>
-      <div class="acc-body ${isOpen?'open':''}">
-        ${donutHtml}${barsHtml}
-      </div>
-      ${!isOpen?`<div class="sub" style="text-align:center">Ketuk untuk melihat rincian</div>`:''}
+      <h2>Rangkuman Kategori ${isExp?'Pengeluaran':'Pemasukan'}</h2>
+      <div>${donutHtml}${barsHtml}</div>
     </div>
   </div>
   
@@ -437,7 +419,7 @@ function showCatDetails(catId) {
       </div>
       <div style="max-height:60vh;overflow-y:auto">
         ${txs.length ? txs.map(t => `
-          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer" onclick="closeModal(); openTx('${t.id}')">
             <div>
               <div style="font-weight:600;font-size:13px">${esc(t.note || 'Tanpa catatan')}</div>
               <div class="sub">${fmtDate(t.date)} • ${esc(accOf(t.accountId) ? accOf(t.accountId).name : '')}</div>
@@ -451,8 +433,11 @@ function showCatDetails(catId) {
 }
 
 /* ---------- TRANSAKSI ---------- */
-function setTxSearch(v){ui.txSearch=v;render();}
-function viewTx(){
+function setTxSearch(v){
+  ui.txSearch=v;
+  updateTxList();
+}
+function updateTxList(){
   const q = (ui.txSearch||'').toLowerCase();
   let list=db.transactions.filter(t=>(t.date||'').startsWith(ui.month));
   
@@ -471,6 +456,19 @@ function viewTx(){
   list.sort((a,b)=>(b.date+b.id).localeCompare(a.date+a.id));
   
   const body=list.length?list.map(txRow).join(''):'<div class="empty">Tidak ada transaksi ditemukan.</div>';
+  const container = document.getElementById('tx-list-container');
+  if(container) container.innerHTML = body;
+}
+
+function viewTx(){
+  const q = (ui.txSearch||'').toLowerCase();
+  let list=db.transactions.filter(t=>(t.date||'').startsWith(ui.month));
+  if(q){ list = list.filter(t=>{
+      const cat=catOf(t.categoryId), acc=accOf(t.accountId), to=accOf(t.toAccountId);
+      return (cat?cat.name.toLowerCase():'').includes(q)||(acc?acc.name.toLowerCase():'').includes(q)||(to?to.name.toLowerCase():'').includes(q)||(t.note||'').toLowerCase().includes(q)||String(t.amount).includes(q);
+  }); }
+  list.sort((a,b)=>(b.date+b.id).localeCompare(a.date+a.id));
+  const body=list.length?list.map(txRow).join(''):'<div class="empty">Tidak ada transaksi ditemukan.</div>';
   
   return `<header><h1>Transaksi</h1><div class="sub">${list.length} transaksi</div></header>
   <div class="pad">
@@ -478,7 +476,7 @@ function viewTx(){
       <input type="month" value="${ui.month}" onchange="setMonth(this.value)" style="flex:0 0 130px">
       <input type="text" placeholder="Cari catatan / kategori..." value="${esc(ui.txSearch)}" oninput="setTxSearch(this.value)" style="flex:1">
     </div>
-    <div class="card">${body}</div>
+    <div class="card" id="tx-list-container">${body}</div>
   </div>
   <button class="fab" onclick="quickAdd('expense')">+</button>`;
 }
@@ -589,10 +587,17 @@ function quickAddCat(type){
   const name=prompt('Nama kategori baru:');if(name===null)return;
   if(!name.trim())return alert('Nama kategori tidak boleh kosong');
   const color=CAT_COLORS[db.categories.length%CAT_COLORS.length];
-  db.categories.push({id:uid(),name:name.trim(),type,color,budget:0});
-  save();render();
-  if(document.getElementById('modal').style.display==='flex'&&document.getElementById('modal').innerHTML.includes('Pilih Kategori')){
-    showCatPicker(ui.formType);
+  const newId = uid();
+  db.categories.push({id:newId,name:name.trim(),type,color,budget:0});
+  save();
+  if(document.getElementById('modal').style.display==='flex'){
+    if(document.getElementById('modal').innerHTML.includes('Pilih Kategori')){
+      showCatPicker(type, newId);
+    } else {
+      pickCategory(newId, name.trim());
+    }
+  } else {
+    render();
   }
 }
 function delCategory(id){
@@ -641,7 +646,7 @@ function sheetHTML(t){
     <div id="wrap-cat" style="display:${ty==='transfer'?'none':'block'};margin-bottom:10px">
       <div class="lb" style="margin-bottom:6px">Kategori</div>
       <div style="display:flex;gap:8px">
-        <button onclick="showCatPicker('${ty}')" style="flex:1;text-align:left;background:var(--card2);color:var(--txt)" id="btn-pick-cat">${esc(selCatName)}</button>
+        <button onclick="showCatPicker('${ty}', document.getElementById('f-cat').value)" style="flex:1;text-align:left;background:var(--card2);color:var(--txt)" id="btn-pick-cat">${esc(selCatName)}</button>
         <button onclick="quickAddCat('${ty}')" style="padding:0 16px;background:var(--acc);color:#fff;font-weight:600">+</button>
       </div>
       <input type="hidden" id="f-cat" value="${selCatId||''}">
@@ -659,7 +664,7 @@ function sheetHTML(t){
   </div>`;
 }
 
-function showCatPicker(type){
+function showCatPicker(type, currentCatId){
   const counts={};
   db.transactions.forEach(t=>{ counts[t.categoryId]=(counts[t.categoryId]||0)+1; });
   
@@ -675,9 +680,10 @@ function showCatPicker(type){
   el.innerHTML=`<div class="sheet" onclick="event.stopPropagation()">
     <div class="sheethead"><b>Pilih Kategori</b><button onclick="backToForm()">✕</button></div>
     <div class="cat-opt-list">
-      ${list.map(c=>`<div class="cat-opt-item" onclick="pickCategory('${c.id}','${esc(c.name)}')">
+      ${list.map(c=>`<div class="cat-opt-item" onclick="pickCategory('${c.id}','${esc(c.name)}')" style="background:${c.id===currentCatId?'var(--card2)':''}">
         <span style="width:12px;height:12px;border-radius:50%;background:${c.color}"></span>
         <span style="flex:1;font-size:15px">${esc(c.name)}</span>
+        ${c.id===currentCatId?'<span style="color:var(--acc);font-weight:bold">✓</span>':''}
         <span class="sub" style="font-size:11px">${counts[c.id]||0} kali</span>
       </div>`).join('')}
     </div>
@@ -693,23 +699,22 @@ function pickCategory(id,name){
 function backToForm(){
   const ty=ui.formType;
   const t=ui.editId?db.transactions.find(x=>x.id===ui.editId):null;
+  
   const amount=document.getElementById('f-amount').value;
   const date=document.getElementById('f-date').value;
   const note=document.getElementById('f-note').value;
   const acc=document.getElementById('f-acc').value;
   const selCat=document.getElementById('f-cat').value;
   
-  document.getElementById('modal').innerHTML=sheetHTML(t);
+  const tempT = Object.assign({}, t || {type: ty});
+  tempT.categoryId = selCat; 
+  
+  document.getElementById('modal').innerHTML=sheetHTML(tempT);
   
   document.getElementById('f-amount').value=amount;
   document.getElementById('f-date').value=date;
   document.getElementById('f-note').value=note;
   document.getElementById('f-acc').value=acc;
-  if(selCat){
-    document.getElementById('f-cat').value=selCat;
-    const c=catOf(selCat);
-    if(c)document.getElementById('btn-pick-cat').innerText=c.name;
-  }
 }
 
 function setFormType(ty){
@@ -840,7 +845,7 @@ function viewSettings(){
       <button class="danger" onclick="resetAll()">Hapus Semua Data</button>
     </div>
 
-    <div class="card" style="text-align:center"><div class="sub">Uangku v6 • Offline & Lokal</div></div>
+    <div class="card" style="text-align:center"><div class="sub">Uangku v7 • Offline & Lokal</div></div>
   </div>`;
 }
 
@@ -889,7 +894,6 @@ function download(blob,name){
   a.href=url;a.download=name;a.target='_blank';
   document.body.appendChild(a);
   a.click();
-  // Jangan revoke terlalu cepat agar unduhan di HP berhasil
   setTimeout(()=>{
     URL.revokeObjectURL(url);
     a.remove();
@@ -902,14 +906,12 @@ function exportJSON(){
   const fname=`uangku-backup-${todayStr()}.json`;
   const url=URL.createObjectURL(blob);
   
-  // Coba unduh otomatis
   const a=document.createElement('a');
   a.href=url;a.download=fname;a.target='_blank';
   document.body.appendChild(a);a.click();
   
   markBackup();render();
   
-  // Tampilkan modal cadangan jika unduhan gagal
   const el=document.getElementById('modal');
   el.style.display='flex';
   el.innerHTML=`
