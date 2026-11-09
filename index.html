@@ -63,7 +63,8 @@ nav .ic{font-size:18px;line-height:1}
 .tx .nm{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tx .ds{font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tx .amt{font-size:14px;font-weight:700;white-space:nowrap}
-.catrow{margin-bottom:14px}
+.catrow{margin-bottom:14px;cursor:pointer;padding:6px;border-radius:10px;transition:background 0.2s}
+.catrow:active{background:var(--card2)}
 .cathead{display:flex;align-items:center;gap:8px;font-size:13.5px}
 .cathead .dot{width:9px;height:9px;border-radius:50%;flex:none}
 .cathead .nm{flex:1}
@@ -101,7 +102,6 @@ nav .ic{font-size:18px;line-height:1}
 .chk{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:14px}
 .chk input{width:auto;flex:none}
 .hint{background:var(--card2);border-left:3px solid var(--acc);padding:10px 12px;border-radius:8px;font-size:12px;color:var(--mut);line-height:1.5;margin-top:8px}
-/* Custom Additions */
 .wallet-details{font-size:12px;color:var(--mut);margin-top:4px;line-height:1.4}
 .dash-tabs{display:flex;gap:6px;margin-bottom:12px}
 .dash-tabs button{flex:1;padding:8px;font-size:13px;font-weight:600;background:var(--card2);color:var(--mut);border-radius:8px}
@@ -243,7 +243,6 @@ function checkRecapNotif(){
     db.settings.lastRecapDate=today; save();
     if(!("Notification" in window))return;
     if(Notification.permission==="granted"){
-      const s=monthStats(today.slice(0,7));
       let expToday=0,incToday=0;
       db.transactions.forEach(t=>{
         if(t.date===today){
@@ -334,13 +333,11 @@ function viewDashboard(){
     <button style="background:#fff;color:#9a3412;padding:8px 12px;font-size:12px;font-weight:700" onclick="setTab('set')">Backup</button>
   </div></div>`:'';
 
-  // List Data berdasarkan Tab
   const isExp = ui.dashTab==='expense';
   const listRaw = isExp ? s.exp : s.inc;
   const list = Object.entries(listRaw).map(([id,v])=>({c:catOf(id),v})).filter(x=>x.c).sort((a,b)=>b.v-a.v);
   const total = isExp ? s.te : s.ti;
   
-  // Donut
   let donutHtml='';
   if(list.length>0&&total>0){
     let acc=0;
@@ -350,12 +347,11 @@ function viewDashboard(){
     </div></div>`;
   }
 
-  // Bars
   const barsHtml = list.length ? list.map(({c,v})=>{
       const p=total>0?v/total*100:0;
       let budLine='';
       if(c.budget>0&&isExp){const bp=v/c.budget*100,over=v>c.budget;budLine=`<div class="pctxt ${over?'red':''}">Anggaran: ${rp(c.budget)} • ${bp.toFixed(0)}%${over?' (LEWAT!)':''}</div>`;}
-      return `<div class="catrow">
+      return `<div class="catrow" onclick="showCatDetails('${c.id}')">
         <div class="cathead"><span class="dot" style="background:${c.color}"></span><span class="nm">${esc(c.name)}</span><span class="am mono">${rp(v)}</span></div>
         <div class="bar"><div style="width:${Math.min(p,100).toFixed(1)}%;background:${c.color}"></div></div>
         <div class="pctxt">${p.toFixed(1)}%</div>${budLine}</div>`;
@@ -418,6 +414,40 @@ function toggleFab(){
     <button style="background:#334155;color:#fff" onclick="quickAdd('transfer')">⇄ Transfer</button>
   `;
   m.style.display='flex';
+}
+
+/* ---------- RINCIAN KATEGORI ---------- */
+function showCatDetails(catId) {
+  const cat = catOf(catId);
+  if(!cat) return;
+  const txs = db.transactions.filter(t => t.categoryId === catId && t.date.startsWith(ui.month)).sort((a,b) => b.date.localeCompare(a.date));
+  const total = txs.reduce((s,t) => s + t.amount, 0);
+
+  const el = document.getElementById('modal');
+  el.style.display = 'flex';
+  el.innerHTML = `
+    <div class="sheet" onclick="event.stopPropagation()">
+      <div class="sheethead">
+        <b>${esc(cat.name)}</b>
+        <button onclick="closeModal()">✕</button>
+      </div>
+      <div style="text-align:center;margin-bottom:16px">
+        <div class="k">Total ${cat.type === 'expense' ? 'Pengeluaran' : 'Pemasukan'}</div>
+        <div class="v mono" style="font-size:20px;color:${cat.color}">${rp(total)}</div>
+      </div>
+      <div style="max-height:60vh;overflow-y:auto">
+        ${txs.length ? txs.map(t => `
+          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">
+            <div>
+              <div style="font-weight:600;font-size:13px">${esc(t.note || 'Tanpa catatan')}</div>
+              <div class="sub">${fmtDate(t.date)} • ${esc(accOf(t.accountId) ? accOf(t.accountId).name : '')}</div>
+            </div>
+            <div class="mono" style="font-weight:600">${rp(t.amount)}</div>
+          </div>
+        `).join('') : '<div class="empty">Tidak ada transaksi di bulan ini.</div>'}
+      </div>
+    </div>
+  `;
 }
 
 /* ---------- TRANSAKSI ---------- */
@@ -630,13 +660,12 @@ function sheetHTML(t){
 }
 
 function showCatPicker(type){
-  // Hitung frekuensi
   const counts={};
   db.transactions.forEach(t=>{ counts[t.categoryId]=(counts[t.categoryId]||0)+1; });
   
   const list=db.categories.filter(c=>c.type===type).sort((a,b)=>{
     const ca=counts[a.id]||0, cb=counts[b.id]||0;
-    if(ca!==cb)return cb-ca; // Descending
+    if(ca!==cb)return cb-ca;
     return a.name.localeCompare(b.name);
   });
 
@@ -664,7 +693,6 @@ function pickCategory(id,name){
 function backToForm(){
   const ty=ui.formType;
   const t=ui.editId?db.transactions.find(x=>x.id===ui.editId):null;
-  // Simpan input yang sudah diketik sementara
   const amount=document.getElementById('f-amount').value;
   const date=document.getElementById('f-date').value;
   const note=document.getElementById('f-note').value;
@@ -673,7 +701,6 @@ function backToForm(){
   
   document.getElementById('modal').innerHTML=sheetHTML(t);
   
-  // Kembalikan inputan
   document.getElementById('f-amount').value=amount;
   document.getElementById('f-date').value=date;
   document.getElementById('f-note').value=note;
@@ -857,17 +884,45 @@ function delRecurring(id){
 
 /* ---------- EXPORT / IMPORT ---------- */
 function download(blob,name){
-  const a=document.createElement('a');const url=URL.createObjectURL(blob);
-  a.href=url;a.download=name;document.body.appendChild(a);a.click();
-  setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},1200);
-}
-function exportJSON(){
-  download(new Blob([JSON.stringify(db,null,2)],{type:'application/json'}),`uangku-backup-${todayStr()}.json`);
-  markBackup();render();
+  const a=document.createElement('a');
+  const url=URL.createObjectURL(blob);
+  a.href=url;a.download=name;a.target='_blank';
+  document.body.appendChild(a);
+  a.click();
+  // Jangan revoke terlalu cepat agar unduhan di HP berhasil
   setTimeout(()=>{
-    alert('✅ File backup berhasil diunduh.\n\nSilakan simpan file tersebut ke Google Drive / WhatsApp agar data Anda aman.');
-  }, 500);
+    URL.revokeObjectURL(url);
+    a.remove();
+  },10000);
 }
+
+function exportJSON(){
+  const jsonStr=JSON.stringify(db,null,2);
+  const blob=new Blob([jsonStr],{type:'application/json'});
+  const fname=`uangku-backup-${todayStr()}.json`;
+  const url=URL.createObjectURL(blob);
+  
+  // Coba unduh otomatis
+  const a=document.createElement('a');
+  a.href=url;a.download=fname;a.target='_blank';
+  document.body.appendChild(a);a.click();
+  
+  markBackup();render();
+  
+  // Tampilkan modal cadangan jika unduhan gagal
+  const el=document.getElementById('modal');
+  el.style.display='flex';
+  el.innerHTML=`
+    <div class="sheet" style="text-align:center">
+      <div class="sheethead" style="justify-content:center"><b>Backup Data</b></div>
+      <div style="font-size:40px;margin:20px 0">💾</div>
+      <div style="margin-bottom:20px;font-size:14px">File backup sedang diunduh.<br>Jika tidak muncul di folder Unduhan, klik tombol di bawah ini:</div>
+      <a href="${url}" download="${fname}" target="_blank" style="display:inline-block;background:var(--acc);color:#fff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:600;margin-bottom:20px">Simpan File Manual</a>
+      <button class="primary" style="background:var(--card2);color:var(--txt)" onclick="closeModal()">Tutup</button>
+    </div>
+  `;
+}
+
 function csvRows(){
   const head=['Tanggal','Jenis','Jumlah','Dompet','DompetTujuan','Kategori','Catatan'];
   const rows=db.transactions.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t=>{
@@ -958,7 +1013,7 @@ render();
 setInterval(()=>{
   if(!locked)applyTheme();
   checkRecapNotif();
-},30000); // Cek notifikasi tiap 30 detik
+},30000);
 </script>
 </body>
 </html>
